@@ -1285,6 +1285,8 @@ body{background:#6e9b56;color:#f2ead5}
       </div>
       <button class="bigBtn hidden" id="btnContinue">Continuar partida</button>
       <button class="bigBtn" id="btnStart">Comenzar la batalla</button>
+      <button class="bigBtn" id="btnTestSound" style="margin-top:10px">♪ Probar sonido</button>
+      <p class="hidden" id="soundStatus" role="status" style="margin:6px 0 0;font-size:13px"></p>
       <button class="bigBtn" id="btnCampaign" style="margin-top:10px">Campaña · La guerra contra Odín</button>
       <p class="hidden" id="menuStatus" role="status"></p>
       <div class="howto">
@@ -1707,7 +1709,7 @@ class AudioSys{
     if(this.ctx) { if(this.ctx.state==="suspended") this.ctx.resume(); return; }
     try{
       const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return;
-      this.ctx=new AC(); this.master=this.ctx.createGain(); this.master.gain.value=this.enabled?.35:0;
+      this.ctx=new AC(); this.master=this.ctx.createGain(); this.master.gain.value=this.enabled?.5:0;
       this.master.connect(this.ctx.destination);
     }catch(e){ this.ctx=null; }
   }
@@ -1783,6 +1785,18 @@ class AudioSys{
     this.musicTimer=setInterval(()=>this.scheduleMusic(),180);
   }
   stopMusic(){ this.musicOn=false; if(this.musicTimer){ clearInterval(this.musicTimer); this.musicTimer=null; } }
+  // Prueba de sonido para el menú: fanfarria + frase de la melodía.
+  // Devuelve false si el navegador no dejó crear audio.
+  testSound(){
+    this.ensure();
+    if(!this.ctx) return false;
+    if(this.ctx.state==="suspended") this.ctx.resume();
+    this.fanfare();
+    const t=this.ctx.currentTime;
+    [587.33,440,523.25,659.25].forEach((f,i)=>this.pluck(f,t+0.15+i*0.22,0.14));
+    this.drone(73.42,t+0.15,1.2,0.07);
+    return true;
+  }
   scheduleMusic(){
     if(!this.musicOn||!this.ctx) return;
     if(!this.enabled||!this.isPlaying()){ this.musicNext=this.ctx.currentTime+0.1; return; }
@@ -1796,7 +1810,7 @@ class AudioSys{
       const r=Math.random();
       if((!battle&&r<0.62)||(battle&&r<0.5)){
         this.melIdx=Math.max(0,Math.min(7,this.melIdx+(((Math.random()*5)|0)-2)));
-        this.pluck(this.musicScale[this.melIdx],w,battle?0.07:0.085);
+        this.pluck(this.musicScale[this.melIdx],w,battle?0.10:0.12);
         if(Math.random()<0.18) this.pluck(this.musicScale[Math.max(0,this.melIdx-2)],w+spb/2,0.05);
       }
       this.musicNext+=spb; this.musicStep++;
@@ -4005,9 +4019,10 @@ function frame(ts){
   requestAnimationFrame(frame);
   const dt=Math.min(0.05,(ts-lastTs)/1000||0.016); lastTs=ts;
   if(game.state==="menu"||document.hidden) return;
-  game.update(dt);
-  render(dt);
-  UI.tick(dt);
+  const sdt=dt*0.8; // el juego va un poco más lento
+  game.update(sdt);
+  render(sdt);
+  UI.tick(sdt);
 }
 // Luz y clima usan el reloj de la partida y se reproducen al cargarla.
 let highGraphics=true;
@@ -4312,6 +4327,8 @@ const INPUT={
     },{passive:false});
     cv.addEventListener("contextmenu",e=>e.preventDefault());
     document.addEventListener("pointerdown",()=>SND.ensure(),{once:false});
+    document.addEventListener("touchstart",()=>SND.ensure(),{passive:true});
+    document.addEventListener("visibilitychange",()=>{ if(!document.hidden) SND.ensure(); });
   },
   resetGesture(){
     this.pointers.clear(); this.downPos=null; this.box=null; this.dragBox=false; this.pinchD=0; this.moved=false;
@@ -4589,7 +4606,7 @@ const UI={
     });
     showQuality();
     $("btnMute").addEventListener("click",()=>{
-      SND.enabled=!SND.enabled; if(SND.master)SND.master.gain.value=SND.enabled?.35:0;
+      SND.enabled=!SND.enabled; if(SND.master)SND.master.gain.value=SND.enabled?.5:0;
       $("btnMute").setAttribute("aria-pressed",String(!SND.enabled));$("btnMute").textContent=SND.enabled?"♪":"×";
     });
     document.addEventListener("keydown",e=>{if(e.key==="Escape"&&game.state==="playing")$("btnCancelOrder").click();});
@@ -4681,6 +4698,11 @@ const UI={
     });
     $("btnCampaign").addEventListener("click",()=>{ SND.ensure(); this.buildMissionList();
       fadeSwap(()=>{ this.el.start.classList.add("hidden"); document.getElementById("campaignScreen").classList.remove("hidden"); }); });
+    $("btnTestSound").addEventListener("click",()=>{
+      const ok=SND.testSound();
+      const st=$("soundStatus"); st.classList.remove("hidden");
+      st.textContent=ok?"Sonido activado: deberías escuchar la fanfarria y la melodía. Si no se escucha, sube el volumen y quita el modo silencio del iPhone.":"No se pudo activar el sonido en este navegador.";
+    });
     $("btnCampaignBack").addEventListener("click",()=>{ fadeSwap(()=>{ document.getElementById("campaignScreen").classList.add("hidden"); this.el.start.classList.remove("hidden"); }); });
     $("btnNextMission").addEventListener("click",()=>{
       const m=game.chapter.mission; const idx=m?CAMPAIGN.findIndex(x=>x.id===m.id):-1;
@@ -5843,6 +5865,9 @@ html,body,#app{height:100dvh !important;overflow:hidden !important}
   #aomRotateBlock{display:flex !important}
   #aomPwaTip{display:none !important}
 }
+/* En el menú principal sí se puede estar en vertical: el bloqueo
+   de "GIRA TU IPHONE" solo aplica durante la partida. */
+html.aom-menu #aomRotateBlock{display:none !important}
 @media (orientation:landscape){
   #aomRotateBlock{display:none !important}
   #hud{--hud-bottom:122px !important}
@@ -6128,12 +6153,17 @@ html,body,#app{height:100dvh !important;overflow:hidden !important}
   document.documentElement.classList.remove("aom-noRotate");
   var block=document.getElementById("aomRotateBlock");
   function isPortrait(){ return window.matchMedia("(orientation: portrait)").matches; }
+  // Solo durante la partida se exige horizontal; el menú principal
+  // se puede ver en vertical y al darle a partida pide girar.
+  function inGame(){ try{ return typeof game!=="undefined"&&game&&(game.state==="playing"||game.state==="paused"||game.state==="choosing"); }catch(e){ return false; } }
   function sync(){
     if(!block) return;
-    block.setAttribute("aria-hidden", isPortrait() ? "false" : "true");
+    var playing=inGame();
+    document.documentElement.classList.toggle("aom-menu",!playing);
+    block.setAttribute("aria-hidden", (playing&&isPortrait()) ? "false" : "true");
     // Si lo giran a vertical en plena batalla, pausa para que no siga
     // el juego mientras no se ve nada.
-    if(isPortrait() && typeof game!=="undefined" && game && game.state==="playing"){
+    if(playing&&isPortrait() && game.state==="playing"){
       var p=document.getElementById("btnPause");
       var ps=document.getElementById("pauseScreen");
       if(p && ps && ps.classList.contains("hidden")) p.click();
@@ -6141,8 +6171,10 @@ html,body,#app{height:100dvh !important;overflow:hidden !important}
   }
   window.addEventListener("orientationchange", function(){ setTimeout(sync, 120); });
   window.addEventListener("resize", sync);
+  setInterval(sync,500);
+  window.__aomSyncRotate=sync;
   // Intenta fijar horizontal al empezar (Safari lo ignora, no rompe nada).
-  ["btnStart","btnCampaign"].forEach(function(id){
+  ["btnStart","btnCampaign","btnContinue","btnAgain"].forEach(function(id){
     var b=document.getElementById(id);
     if(b) b.addEventListener("click", function(){
       try{ if(screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(function(){}); }catch(e){}
